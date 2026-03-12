@@ -6,6 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -19,36 +21,59 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-
+import androidx.compose.runtime.*
 
 enum class HeadlightMode {
     OFF, LOW_BEAM, HIGH_BEAM
 }
-// --- 1. Main App State (Passkey Verification) ---
+
 @Composable
-fun BikeApp() {
+fun BikeApp(viewModel: BikeViewModel) {
     var isUnlocked by remember { mutableStateOf(false) }
+
+    // 1. Observe the live data stream
+    val evData by viewModel.evData.collectAsState()
 
     if (!isUnlocked) {
         PasskeyScreen(onUnlock = { isUnlocked = true })
     } else {
-        DashboardScreen(
-            speed = 42,
-            batteryPercent = 15,
-            throttleLevel = 0.6f,
-            tripMeter = 12.4f,
-            odoMeter = 1450.0f,
-            rangeRemaining = 12,
-            isAutoBrightness = true,
-            isCharging = false,
-            timeToCharge = "2h 15m",
-            warnings = listOf("Low Power Mode Active", "Check Tire Pressure"),
-            isAntiTheftActive = true,
+        // 2. Decode the Bitwise Flags
+        // 1:LowBat, 2:Light, 4:L_Ind, 8:R_Ind
+        val isLowBat = (evData.flags and 1) != 0
+        val isLightOn = (evData.flags and 2) != 0
+        val isLeftInd = (evData.flags and 4) != 0
+        val isRightInd = (evData.flags and 8) != 0
 
-            // --- New Feature States ---
-            headlightMode = HeadlightMode.OFF, // Change to OFF or LOW_BEAM to see the UI update
-            isLeftIndicatorOn = true,                // Simulating the left turn signal being active
-            isRightIndicatorOn = false
+        // 3. Process dynamic values
+        val formattedTime = "${evData.t_chrg / 60}h ${evData.t_chrg % 60}m"
+        val activeWarnings = mutableListOf<String>()
+        if (isLowBat) activeWarnings.add("Low Power Mode Active")
+        if (evData.temp > 45) activeWarnings.add("Battery Temp High!")
+
+        // 4. Determine Headlight Mode based on Light flag + Lux (auto-highbeam logic)
+        val currentHeadlightMode = when {
+            !isLightOn -> HeadlightMode.OFF
+            evData.lux < 30 -> HeadlightMode.HIGH_BEAM // Dark = High Beam
+            else -> HeadlightMode.LOW_BEAM
+        }
+
+        // 5. Pass data to Dashboard
+        DashboardScreen(
+            speed = evData.speed,
+            batteryPercent = evData.bat,
+            throttleLevel = evData.throt / 100f, // Convert 0-100 to 0.0-1.0
+            tripMeter = evData.trip,
+            odoMeter = evData.odo,
+            rangeRemaining = evData.range,
+            isAutoBrightness = true, // You could drive this from settings later
+            isCharging = evData.chrg,
+            timeToCharge = formattedTime,
+            warnings = activeWarnings,
+            isAntiTheftActive = true, // Static for now
+            headlightMode = currentHeadlightMode,
+            isLeftIndicatorOn = isLeftInd,
+            isRightIndicatorOn = isRightInd,
+            temp = evData.temp // Pass temperature if you want to update your TopStatusBar
         )
     }
 }
@@ -92,7 +117,8 @@ fun DashboardScreen(
     isAntiTheftActive: Boolean,
     headlightMode: HeadlightMode,
     isLeftIndicatorOn: Boolean,
-    isRightIndicatorOn: Boolean
+    isRightIndicatorOn: Boolean,
+    temp: Int // Added temperature parameter
 ) {
     Column(
         modifier = Modifier
@@ -104,7 +130,9 @@ fun DashboardScreen(
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            TopStatusBar(isAutoBrightness, headlightMode, isLeftIndicatorOn, isRightIndicatorOn)
+            // Passed temp down to the TopStatusBar
+            TopStatusBar(isAutoBrightness, headlightMode, isLeftIndicatorOn, isRightIndicatorOn, temp)
+
             if (!isCharging && batteryPercent < 20) {
                 WarningBanner(warnings)
             }
@@ -118,14 +146,14 @@ fun DashboardScreen(
         }
     }
 }
-
 // --- 4. Top Status & Warnings ---
 @Composable
 fun TopStatusBar(
     isAutoBrightness: Boolean,
     headlightMode: HeadlightMode,
     isLeftIndicatorOn: Boolean,
-    isRightIndicatorOn: Boolean
+    isRightIndicatorOn: Boolean,
+    temp: Int // Added temperature parameter
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -134,7 +162,7 @@ fun TopStatusBar(
     ) {
         // Left Indicator: Bright primary color if ON, dimmed surface color if OFF
         Icon(
-            imageVector = Icons.Default.ArrowBack,
+            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
             contentDescription = "Left Indicator",
             tint = if (isLeftIndicatorOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
         )
@@ -155,19 +183,27 @@ fun TopStatusBar(
             )
 
             if (isAutoBrightness) {
-                Icon(Icons.Default.BrightnessAuto, contentDescription = "Auto Brightness", tint = MaterialTheme.colorScheme.onBackground, modifier = Modifier.size(16.dp))
+                Icon(
+                    imageVector = Icons.Default.BrightnessAuto,
+                    contentDescription = "Auto Brightness",
+                    tint = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.size(16.dp)
+                )
             }
-            Text(text = "24°C", color = MaterialTheme.colorScheme.onBackground)
+
+            // Replaced hardcoded string with dynamic temp variable
+            Text(text = "${temp}°C", color = MaterialTheme.colorScheme.onBackground)
         }
 
         // Right Indicator: Bright primary color if ON, dimmed surface color if OFF
         Icon(
-            imageVector = Icons.Default.ArrowForward,
+            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
             contentDescription = "Right Indicator",
             tint = if (isRightIndicatorOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
         )
     }
 }
+
 @Composable
 fun WarningBanner(warnings: List<String>) {
     if (warnings.isNotEmpty()) {

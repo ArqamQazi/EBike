@@ -5,18 +5,20 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.example.ebike2.ui.theme.EBike2Theme
 
+import androidx.activity.viewModels
+
 class MainActivity : ComponentActivity() {
+
+    // Instantiate ViewModel tied to Activity lifecycle
+    private val viewModel: BikeViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // This ensures the UI draws behind the system bars for a modern look
-        enableEdgeToEdge()
-
+        enableEdgeToEdge();
         setContent {
-            EBike2Theme {
-                // We are passing hardcoded dummy data here just to test the UI layout.
-                // Later, this data will come from your ESP32 via a ViewModel.
-                BikeApp()
+            EBike2Theme { // Assuming your theme is here
+                BikeApp(viewModel = viewModel)
             }
         }
     }
