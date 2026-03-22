@@ -20,7 +20,11 @@ class MainActivity : ComponentActivity() {
     ) { permissions ->
         val allGranted = permissions.entries.all { it.value }
         if (allGranted) {
-            viewModel.startBleProcess()
+            // Change this to viewModel.startBleProcess() when you are
+            // ready to connect to your real ESP32-S3 hardware!
+            viewModel.startSimulation()
+        } else {
+            println("Permissions not granted by the user.")
         }
     }
 
@@ -28,17 +32,22 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Check/Request permissions based on Android Version
+        // Smart Permission Request based on Android Version
         val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Android 12+ (Only needs Bluetooth, no location required)
             arrayOf(
                 Manifest.permission.BLUETOOTH_SCAN,
-                Manifest.permission.BLUETOOTH_CONNECT,
-                Manifest.permission.ACCESS_FINE_LOCATION
+                Manifest.permission.BLUETOOTH_CONNECT
             )
         } else {
-            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+            // Android 11 and lower (Requires BOTH location types to scan for BLE)
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            )
         }
 
+        // Launch the permission popup
         requestPermissionLauncher.launch(permissions)
 
         setContent {

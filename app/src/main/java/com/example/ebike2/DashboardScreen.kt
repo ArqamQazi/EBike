@@ -28,7 +28,10 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.TextStyle
 import kotlin.math.cos
 import kotlin.math.sin
-
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.getValue
 
 enum class HeadlightMode {
     OFF, LOW_BEAM, HIGH_BEAM
@@ -274,10 +277,26 @@ fun WarningBanner(warnings: List<String>) {
 fun CenterGauge(speed: Int, throttleLevel: Float, battery: Int, isCharging: Boolean, timeToCharge: String) {
     val onBackgroundColor = MaterialTheme.colorScheme.onBackground
     val primaryColor = MaterialTheme.colorScheme.primary
-    val neonCyan = Color(0xFF00E5FF) // The glowing blue from your image
+    val secondaryColor = MaterialTheme.colorScheme.secondary
+    val neonCyan = Color(0xFF00E5FF)
     val darkGray = Color.DarkGray
 
     val textMeasurer = rememberTextMeasurer()
+
+    // --- ANIMATIONS ---
+    // This makes the needle sweep smoothly over 300 milliseconds
+    val animatedSpeed by animateFloatAsState(
+        targetValue = speed.toFloat(),
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "speed_anim"
+    )
+
+    // This makes the throttle ring fill up smoothly
+    val animatedThrottle by animateFloatAsState(
+        targetValue = throttleLevel,
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "throttle_anim"
+    )
 
     // Gauge Configuration
     val maxSpeed = 160f
@@ -286,7 +305,6 @@ fun CenterGauge(speed: Int, throttleLevel: Float, battery: Int, isCharging: Bool
 
     Box(
         contentAlignment = Alignment.Center,
-        // Make it scale beautifully in landscape
         modifier = Modifier.aspectRatio(1f).fillMaxHeight(0.9f).padding(16.dp)
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -302,13 +320,21 @@ fun CenterGauge(speed: Int, throttleLevel: Float, battery: Int, isCharging: Bool
                 style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
             )
 
-            // 2. Draw Ticks and Numbers
+            // 2. Draw Animated Throttle Ring
+            drawArc(
+                color = secondaryColor,
+                startAngle = startAngle,
+                sweepAngle = sweepAngle * animatedThrottle.coerceIn(0f, 1f),
+                useCenter = false,
+                style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
+            )
+
+            // 3. Draw Ticks and Numbers
             for (i in 0..160 step 10) {
                 val isMajor = i % 20 == 0
                 val angleDeg = startAngle + (i / maxSpeed) * sweepAngle
                 val angleRad = Math.toRadians(angleDeg.toDouble())
 
-                // Line Coordinates
                 val outerRad = radius - 10.dp.toPx()
                 val innerRad = if (isMajor) outerRad - 15.dp.toPx() else outerRad - 8.dp.toPx()
 
@@ -321,7 +347,6 @@ fun CenterGauge(speed: Int, throttleLevel: Float, battery: Int, isCharging: Bool
                     y = center.y + innerRad * sin(angleRad).toFloat()
                 )
 
-                // Draw Tick Marks
                 drawLine(
                     color = if (isMajor) Color.White else Color.Gray,
                     start = startLine,
@@ -329,7 +354,6 @@ fun CenterGauge(speed: Int, throttleLevel: Float, battery: Int, isCharging: Bool
                     strokeWidth = if (isMajor) 3.dp.toPx() else 1.5.dp.toPx()
                 )
 
-                // Draw Text for Major Ticks (0, 20, 40...)
                 if (isMajor) {
                     val text = i.toString()
                     val textLayoutResult = textMeasurer.measure(
@@ -350,8 +374,9 @@ fun CenterGauge(speed: Int, throttleLevel: Float, battery: Int, isCharging: Bool
                 }
             }
 
-            // 3. Draw Needle
-            val clampedSpeed = speed.coerceIn(0, maxSpeed.toInt())
+            // 4. Draw Animated Needle
+            // Use animatedSpeed here instead of the raw speed
+            val clampedSpeed = animatedSpeed.coerceIn(0f, maxSpeed)
             val needleAngleDeg = startAngle + (clampedSpeed / maxSpeed) * sweepAngle
             val needleAngleRad = Math.toRadians(needleAngleDeg.toDouble())
 
@@ -456,9 +481,10 @@ fun BottomInfoRow(trip: Float, odo: Float, range: Int) {
             .padding(20.dp),
         horizontalArrangement = Arrangement.SpaceEvenly
     ) {
-        MetricItem(label = "TRIP", value = "${trip}km")
+        // Use .toInt() to remove all decimal points!
+        MetricItem(label = "TRIP", value = "${trip.toInt()}km")
         MetricItem(label = "RANGE", value = "${range}km", valueColor = MaterialTheme.colorScheme.primary)
-        MetricItem(label = "ODO", value = "${odo}km")
+        MetricItem(label = "ODO", value = "${odo.toInt()}km")
     }
 }
 
