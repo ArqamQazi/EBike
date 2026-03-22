@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    kotlin("plugin.serialization") version "1.9.22"
 }
 
 android {
@@ -63,4 +64,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended:1.6.3")
     implementation("com.hivemq:hivemq-mqtt-client:1.3.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
+    implementation("com.juul.kable:core:0.31.0")
 }

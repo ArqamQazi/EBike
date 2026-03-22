@@ -14,14 +14,21 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.runtime.*
+import androidx.compose.ui.text.ExperimentalTextApi
+import android.content.res.Configuration
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.TextStyle
+import kotlin.math.cos
+import kotlin.math.sin
+
 
 enum class HeadlightMode {
     OFF, LOW_BEAM, HIGH_BEAM
@@ -38,7 +45,6 @@ fun BikeApp(viewModel: BikeViewModel) {
         PasskeyScreen(onUnlock = { isUnlocked = true })
     } else {
         // 2. Decode the Bitwise Flags
-        // 1:LowBat, 2:Light, 4:L_Ind, 8:R_Ind
         val isLowBat = (evData.flags and 1) != 0
         val isLightOn = (evData.flags and 2) != 0
         val isLeftInd = (evData.flags and 4) != 0
@@ -50,10 +56,14 @@ fun BikeApp(viewModel: BikeViewModel) {
         if (isLowBat) activeWarnings.add("Low Power Mode Active")
         if (evData.temp > 45) activeWarnings.add("Battery Temp High!")
 
+        // 🟢 FIX: Calculate the estimated range on the Android side
+        // Assuming a max range of 60km. Formula: (Battery% / 100) * MaxRange
+        val estimatedRange = ((evData.bat / 100f) * 60f).toInt()
+
         // 4. Determine Headlight Mode based on Light flag + Lux (auto-highbeam logic)
         val currentHeadlightMode = when {
             !isLightOn -> HeadlightMode.OFF
-            evData.lux < 30 -> HeadlightMode.HIGH_BEAM // Dark = High Beam
+            evData.lux < 30 -> HeadlightMode.HIGH_BEAM
             else -> HeadlightMode.LOW_BEAM
         }
 
@@ -61,19 +71,19 @@ fun BikeApp(viewModel: BikeViewModel) {
         DashboardScreen(
             speed = evData.speed,
             batteryPercent = evData.bat,
-            throttleLevel = evData.throt / 100f, // Convert 0-100 to 0.0-1.0
+            throttleLevel = evData.throt / 100f,
             tripMeter = evData.trip,
             odoMeter = evData.odo,
-            rangeRemaining = evData.range,
-            isAutoBrightness = true, // You could drive this from settings later
+            rangeRemaining = estimatedRange,
+            isAutoBrightness = true,
             isCharging = evData.chrg,
             timeToCharge = formattedTime,
             warnings = activeWarnings,
-            isAntiTheftActive = true, // Static for now
+            isAntiTheftActive = true,
             headlightMode = currentHeadlightMode,
             isLeftIndicatorOn = isLeftInd,
             isRightIndicatorOn = isRightInd,
-            temp = evData.temp // Pass temperature if you want to update your TopStatusBar
+            temp = evData.temp
         )
     }
 }
@@ -118,31 +128,66 @@ fun DashboardScreen(
     headlightMode: HeadlightMode,
     isLeftIndicatorOn: Boolean,
     isRightIndicatorOn: Boolean,
-    temp: Int // Added temperature parameter
+    temp: Int
 ) {
-    Column(
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .systemBarsPadding()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween
+            .padding(24.dp)
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // Passed temp down to the TopStatusBar
-            TopStatusBar(isAutoBrightness, headlightMode, isLeftIndicatorOn, isRightIndicatorOn, temp)
+        if (isLandscape) {
+            // --- LANDSCAPE LAYOUT ---
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Left Side: Gauge
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    CenterGauge(speed, throttleLevel, batteryPercent, isCharging, timeToCharge)
+                }
 
-            if (!isCharging && batteryPercent < 20) {
-                WarningBanner(warnings)
+                Spacer(modifier = Modifier.width(32.dp))
+
+                // Right Side: Info & Warnings
+                Column(
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        TopStatusBar(isAutoBrightness, headlightMode, isLeftIndicatorOn, isRightIndicatorOn, temp)
+                        if (!isCharging && batteryPercent < 20) WarningBanner(warnings)
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        SecurityAndGpsRow(isAntiTheftActive)
+                        BottomInfoRow(tripMeter, odoMeter, rangeRemaining)
+                    }
+                }
             }
-        }
+        } else {
+            // --- PORTRAIT LAYOUT (Original) ---
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    TopStatusBar(isAutoBrightness, headlightMode, isLeftIndicatorOn, isRightIndicatorOn, temp)
+                    if (!isCharging && batteryPercent < 20) WarningBanner(warnings)
+                }
 
-        CenterGauge(speed, throttleLevel, batteryPercent, isCharging, timeToCharge)
+                CenterGauge(speed, throttleLevel, batteryPercent, isCharging, timeToCharge)
 
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            SecurityAndGpsRow(isAntiTheftActive)
-            BottomInfoRow(tripMeter, odoMeter, rangeRemaining)
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    SecurityAndGpsRow(isAntiTheftActive)
+                    BottomInfoRow(tripMeter, odoMeter, rangeRemaining)
+                }
+            }
         }
     }
 }
@@ -224,48 +269,129 @@ fun WarningBanner(warnings: List<String>) {
 }
 
 // --- 5. Center Gauge (Now supports Charging state) ---
+@OptIn(ExperimentalTextApi::class)
 @Composable
 fun CenterGauge(speed: Int, throttleLevel: Float, battery: Int, isCharging: Boolean, timeToCharge: String) {
-    val surfaceColor = MaterialTheme.colorScheme.surface
-    val secondaryColor = MaterialTheme.colorScheme.secondary
-    val primaryColor = MaterialTheme.colorScheme.primary
     val onBackgroundColor = MaterialTheme.colorScheme.onBackground
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val neonCyan = Color(0xFF00E5FF) // The glowing blue from your image
+    val darkGray = Color.DarkGray
+
+    val textMeasurer = rememberTextMeasurer()
+
+    // Gauge Configuration
+    val maxSpeed = 160f
+    val startAngle = 140f
+    val sweepAngle = 260f
 
     Box(
         contentAlignment = Alignment.Center,
-        modifier = Modifier.size(300.dp)
+        // Make it scale beautifully in landscape
+        modifier = Modifier.aspectRatio(1f).fillMaxHeight(0.9f).padding(16.dp)
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val strokeWidthPx = 16.dp.toPx()
-            val arcSize = Size(size.width - strokeWidthPx, size.height - strokeWidthPx)
+            val center = Offset(size.width / 2, size.height / 2)
+            val radius = size.minDimension / 2
 
+            // 1. Draw Outer Track (Background arc)
             drawArc(
-                color = surfaceColor,
-                startAngle = 140f,
-                sweepAngle = 260f,
+                color = darkGray.copy(alpha = 0.5f),
+                startAngle = startAngle,
+                sweepAngle = sweepAngle,
                 useCenter = false,
-                style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round),
-                size = arcSize,
-                topLeft = Offset(strokeWidthPx / 2, strokeWidthPx / 2)
+                style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
             )
 
-            drawArc(
-                color = secondaryColor,
-                startAngle = 140f,
-                sweepAngle = 260f * throttleLevel.coerceIn(0f, 1f),
-                useCenter = false,
-                style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round),
-                size = arcSize,
-                topLeft = Offset(strokeWidthPx / 2, strokeWidthPx / 2)
+            // 2. Draw Ticks and Numbers
+            for (i in 0..160 step 10) {
+                val isMajor = i % 20 == 0
+                val angleDeg = startAngle + (i / maxSpeed) * sweepAngle
+                val angleRad = Math.toRadians(angleDeg.toDouble())
+
+                // Line Coordinates
+                val outerRad = radius - 10.dp.toPx()
+                val innerRad = if (isMajor) outerRad - 15.dp.toPx() else outerRad - 8.dp.toPx()
+
+                val startLine = Offset(
+                    x = center.x + outerRad * cos(angleRad).toFloat(),
+                    y = center.y + outerRad * sin(angleRad).toFloat()
+                )
+                val endLine = Offset(
+                    x = center.x + innerRad * cos(angleRad).toFloat(),
+                    y = center.y + innerRad * sin(angleRad).toFloat()
+                )
+
+                // Draw Tick Marks
+                drawLine(
+                    color = if (isMajor) Color.White else Color.Gray,
+                    start = startLine,
+                    end = endLine,
+                    strokeWidth = if (isMajor) 3.dp.toPx() else 1.5.dp.toPx()
+                )
+
+                // Draw Text for Major Ticks (0, 20, 40...)
+                if (isMajor) {
+                    val text = i.toString()
+                    val textLayoutResult = textMeasurer.measure(
+                        text = text,
+                        style = TextStyle(color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    )
+
+                    val textRad = innerRad - 20.dp.toPx()
+                    val textCenter = Offset(
+                        x = center.x + textRad * cos(angleRad).toFloat() - (textLayoutResult.size.width / 2),
+                        y = center.y + textRad * sin(angleRad).toFloat() - (textLayoutResult.size.height / 2)
+                    )
+
+                    drawText(
+                        textLayoutResult = textLayoutResult,
+                        topLeft = textCenter
+                    )
+                }
+            }
+
+            // 3. Draw Needle
+            val clampedSpeed = speed.coerceIn(0, maxSpeed.toInt())
+            val needleAngleDeg = startAngle + (clampedSpeed / maxSpeed) * sweepAngle
+            val needleAngleRad = Math.toRadians(needleAngleDeg.toDouble())
+
+            val needleLength = radius - 35.dp.toPx()
+            val needleEnd = Offset(
+                x = center.x + needleLength * cos(needleAngleRad).toFloat(),
+                y = center.y + needleLength * sin(needleAngleRad).toFloat()
+            )
+
+            // Needle Line
+            drawLine(
+                color = neonCyan,
+                start = center,
+                end = needleEnd,
+                strokeWidth = 6.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+
+            // Center Dot
+            drawCircle(
+                color = neonCyan,
+                radius = 12.dp.toPx(),
+                center = center
+            )
+            drawCircle(
+                color = Color.Black,
+                radius = 6.dp.toPx(),
+                center = center
             )
         }
 
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(text = speed.toString(), fontSize = 84.sp, fontWeight = FontWeight.Bold, color = onBackgroundColor)
-            Text(text = "km/h", fontSize = 18.sp, color = secondaryColor)
-            Spacer(modifier = Modifier.height(16.dp))
+        // Inner Digital Text (Bottom Center)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp)
+        ) {
+            Text(text = speed.toString(), fontSize = 48.sp, fontWeight = FontWeight.Bold, color = onBackgroundColor)
+            Text(text = "km/h", fontSize = 14.sp, color = Color.Gray)
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Show Battery % or Time to Charge based on state
             if (isCharging) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.BatteryChargingFull, contentDescription = "Charging", tint = MaterialTheme.colorScheme.tertiary)
